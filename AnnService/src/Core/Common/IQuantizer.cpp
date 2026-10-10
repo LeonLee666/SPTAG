@@ -41,6 +41,13 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
             break;
         }
 
+        if (ret == nullptr)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unsupported reconstruct type %s for PQ quantizer.\n",
+                         Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            return ret;
+        }
+
         if (ret->LoadQuantizer(p_in) != ErrorCode::Success)
             ret.reset();
         return ret;
@@ -57,6 +64,14 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(std::shared_ptr<Helper::D
         default:
             break;
         }
+
+        if (ret == nullptr)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unsupported reconstruct type %s for OPQ quantizer.\n",
+                         Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            return ret;
+        }
+
         if (ret->LoadQuantizer(p_in) != ErrorCode::Success)
             ret.reset();
         return ret;
@@ -97,6 +112,13 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
             break;
         }
 
+        if (ret == nullptr)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unsupported reconstruct type %s for PQ quantizer.\n",
+                         Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            return ret;
+        }
+
         if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)
             ret.reset();
         return ret;
@@ -112,6 +134,13 @@ std::shared_ptr<IQuantizer> IQuantizer::LoadIQuantizer(SPTAG::ByteArray bytes)
 #undef DefineVectorValueType
         default:
             break;
+        }
+
+        if (ret == nullptr)
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Unsupported reconstruct type %s for OPQ quantizer.\n",
+                         Helper::Convert::ConvertToString<VectorValueType>(reconstructType).c_str());
+            return ret;
         }
 
         if (ret->LoadQuantizer(raw_bytes) != ErrorCode::Success)

@@ -150,11 +150,17 @@ namespace SPTAG
         template <typename T>
         ErrorCode OPQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in)
         {
-            auto code = PQQuantizer<OPQMatrixType>::LoadQuantizer(p_in);
+            // The OPQ file has no DistCalcMethod field: right after the codebooks it stores the
+            // rotation matrix. So only load the PQ header/codebooks here and read the matrix next.
+            auto code = PQQuantizer<OPQMatrixType>::LoadQuantizerCore(p_in);
             if (code != ErrorCode::Success)
             {
                 return code;
             }
+            m_distMethod = DistCalcMethod::L2;
+            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+            InitializeDistanceTables();
+
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
             m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
             IOBINARY(p_in, ReadBinary, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim, (char*)m_OPQMatrix.get());
@@ -167,8 +173,17 @@ namespace SPTAG
         template <typename T>
         ErrorCode OPQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
         {
-            PQQuantizer<OPQMatrixType>::LoadQuantizer(raw_bytes);
-            raw_bytes += sizeof(DimensionType) + sizeof(SizeType) + sizeof(DimensionType) + (sizeof(OPQMatrixType) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
+            // Same as above: LoadQuantizerCore stops right after the codebooks, so the rotation
+            // matrix starts at the current pointer.
+            auto code = PQQuantizer<OPQMatrixType>::LoadQuantizerCore(raw_bytes);
+            if (code != ErrorCode::Success)
+            {
+                return code;
+            }
+            m_distMethod = DistCalcMethod::L2;
+            m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
+            InitializeDistanceTables();
+
             m_matrixDim = m_NumSubvectors * m_DimPerSubvector;
             m_OPQMatrix = std::make_unique<OPQMatrixType[]>(m_matrixDim * m_matrixDim);
             std::memcpy(m_OPQMatrix.get(), raw_bytes, sizeof(OPQMatrixType) * m_matrixDim * m_matrixDim);

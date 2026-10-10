@@ -94,6 +94,13 @@ namespace SPTAG
             inline SizeType m_DistIndexCalc(SizeType i, SizeType j, SizeType k) const;
             void InitializeDistanceTables();
 
+            // Load only the header (subvector / centroid counts) and the codebooks, leaving the
+            // stream position right after them. The DistCalcMethod byte that a plain PQ file may
+            // store there is handled by LoadQuantizer, because an OPQ file stores its rotation
+            // matrix at that position instead, so the caller has to decide.
+            ErrorCode LoadQuantizerCore(std::shared_ptr<Helper::DiskIO> p_in);
+            ErrorCode LoadQuantizerCore(std::uint8_t*& raw_bytes);
+
             std::unique_ptr<T[]> m_codebooks;
             std::unique_ptr<const float[]> m_L2DistanceTables;
         };
@@ -280,7 +287,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode PQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in)
+        ErrorCode PQQuantizer<T>::LoadQuantizerCore(std::shared_ptr<Helper::DiskIO> p_in)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             IOBINARY(p_in, ReadBinary, sizeof(DimensionType), (char*)&m_NumSubvectors);
@@ -293,13 +300,21 @@ namespace SPTAG
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "sizeof(T): %s.\n", std::to_string(sizeof(T)).c_str());
             IOBINARY(p_in, ReadBinary, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector, (char*)m_codebooks.get());
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
-            
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode PQQuantizer<T>::LoadQuantizer(std::shared_ptr<Helper::DiskIO> p_in)
+        {
+            ErrorCode coreCode = LoadQuantizerCore(p_in);
+            if (coreCode != ErrorCode::Success) return coreCode;
+
             if (p_in->ReadBinary(sizeof(DistCalcMethod), (char*)&m_distMethod) != sizeof(DistCalcMethod)) {
                 m_distMethod = DistCalcMethod::L2;
             }
 
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dist: %s.\n", Helper::Convert::ConvertToString(m_distMethod).c_str());
-            
+
 
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             InitializeDistanceTables();
@@ -308,7 +323,7 @@ namespace SPTAG
         }
 
         template <typename T>
-        ErrorCode PQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
+        ErrorCode PQQuantizer<T>::LoadQuantizerCore(std::uint8_t*& raw_bytes)
         {
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loading Quantizer.\n");
             m_NumSubvectors = *(DimensionType*)raw_bytes;
@@ -325,7 +340,15 @@ namespace SPTAG
             std::memcpy(m_codebooks.get(), raw_bytes, sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector);
             raw_bytes += sizeof(T) * m_NumSubvectors * m_KsPerSubvector * m_DimPerSubvector;
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read codebooks.\n");
-            
+            return ErrorCode::Success;
+        }
+
+        template <typename T>
+        ErrorCode PQQuantizer<T>::LoadQuantizer(std::uint8_t* raw_bytes)
+        {
+            ErrorCode coreCode = LoadQuantizerCore(raw_bytes);
+            if (coreCode != ErrorCode::Success) return coreCode;
+
             m_distMethod = *(DistCalcMethod*)raw_bytes;
             raw_bytes += sizeof(DistCalcMethod);
             if (m_distMethod >= DistCalcMethod::Undefined) {
@@ -333,7 +356,7 @@ namespace SPTAG
                 raw_bytes -= sizeof(DistCalcMethod);
             }
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "After read dist: %s.\n", Helper::Convert::ConvertToString(m_distMethod).c_str());
-            
+
             m_BlockSize = m_KsPerSubvector * m_KsPerSubvector;
             InitializeDistanceTables();
             SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Loaded quantizer: Subvectors:%d KsPerSubvector:%d DimPerSubvector:%d\n", m_NumSubvectors, m_KsPerSubvector, m_DimPerSubvector);

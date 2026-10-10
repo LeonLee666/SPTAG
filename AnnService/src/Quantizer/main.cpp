@@ -214,7 +214,11 @@ int main(int argc, char *argv[])
         if (fp_load == nullptr ||
             !fp_load->Initialize(options->m_outputQuantizerFile.c_str(), std::ios::binary | std::ios::in))
         {
-            SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Quantizer Does not exist. Not supported for OPQ.\n");
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                         "OPQ quantizer file '%s' does not exist or cannot be opened. "
+                         "OPQ rotation + codebooks cannot be trained by this tool, they must be trained "
+                         "in advance with Tools/OPQ/OPQ_gpu_train_infer.py and passed via -oq.\n",
+                         options->m_outputQuantizerFile.c_str());
             exit(1);
         }
         else
