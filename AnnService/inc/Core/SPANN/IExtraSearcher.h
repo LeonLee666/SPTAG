@@ -78,6 +78,27 @@ namespace SPTAG {
             std::chrono::steady_clock::time_point m_searchRequestTime;
 
             int m_threadID;
+
+            // First three valid posting candidates, in head-distance order.
+            std::vector<int> m_nearestPostingIDs;
+            std::vector<std::vector<int>> m_nearestPostingVectorIDs;
+            std::vector<std::vector<float>> m_nearestPostingVectorDists;
+
+            void ClearPostingTrace() {
+                m_nearestPostingIDs.clear();
+                m_nearestPostingVectorIDs.clear();
+                m_nearestPostingVectorDists.clear();
+            }
+
+            void CollectPostingVector(int postingID, int vectorID, float distance) {
+                for (size_t s = 0; s < m_nearestPostingIDs.size(); ++s) {
+                    if (m_nearestPostingIDs[s] == postingID) {
+                        m_nearestPostingVectorIDs[s].push_back(vectorID);
+                        m_nearestPostingVectorDists[s].push_back(distance);
+                        break;
+                    }
+                }
+            }
         };
 
         struct IndexStats {
@@ -237,11 +258,14 @@ namespace SPTAG {
                     }
                 }
 
+                m_postingTrace = nullptr;
                 m_enableDataCompression = enableDataCompression;
                 if (enableDataCompression) {
                     m_decompressBuffer.ReservePageBuffer(p_maxPages);
                 }
             }
+
+            SearchStats* m_postingTrace = nullptr;
 
             std::vector<int> m_postingIDs;
 

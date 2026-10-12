@@ -1884,6 +1884,9 @@ namespace SPTAG::SPANN {
                     }
                     auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), vectorInfo + m_metaDataSize);
                     queryResults.AddPoint(vectorID, distance2leaf);
+                    if (p_exWorkSpace->m_postingTrace) {
+                        p_exWorkSpace->m_postingTrace->CollectPostingVector(curPostingID, vectorID, distance2leaf);
+                    }
                 }
                 auto compEnd = std::chrono::high_resolution_clock::now();
                 if (m_opt->m_asyncMergeInSearch && realNum <= m_mergeThreshold) MergeAsync(p_index.get(), curPostingID); // TODO: Control merge

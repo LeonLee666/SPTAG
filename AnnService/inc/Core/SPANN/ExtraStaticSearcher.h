@@ -126,6 +126,9 @@ namespace SPTAG
             (this->*m_parseEncoding)(p_index, listInfo, (ValueType*)(p_postingListFullData + offsetVector));\
             auto distance2leaf = p_index->ComputeDistance(queryResults.GetQuantizedTarget(), p_postingListFullData + offsetVector); \
             queryResults.AddPoint(vectorID, distance2leaf); \
+            if (p_exWorkSpace->m_postingTrace) { \
+                p_exWorkSpace->m_postingTrace->CollectPostingVector(static_cast<int>(listInfo - m_listInfos.data()), vectorID, distance2leaf); \
+            } \
         } \
 
 #define ProcessPostingOffset() \

@@ -518,6 +518,7 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
 
 template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats) const
 {
+    if (p_stats) p_stats->ClearPostingTrace();
     if (nullptr == m_extraSearcher)
         return ErrorCode::EmptyIndex;
 
@@ -547,6 +548,9 @@ template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, 
         if (m_extraSearcher->CheckValidPosting(res->VID))
         {
             workSpace->m_postingIDs.emplace_back(res->VID);
+            if (p_stats && p_stats->m_nearestPostingIDs.size() < 3) {
+                p_stats->m_nearestPostingIDs.push_back(res->VID);
+            }
         }
 
         if (m_vectorTranslateMap.R() != 0)
@@ -582,8 +586,14 @@ template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, 
         }
     }
 
+    if (p_stats) {
+        p_stats->m_nearestPostingVectorIDs.resize(p_stats->m_nearestPostingIDs.size());
+        p_stats->m_nearestPostingVectorDists.resize(p_stats->m_nearestPostingIDs.size());
+        workSpace->m_postingTrace = p_stats;
+    }
     p_queryResults->Reverse();
     m_extraSearcher->SearchIndex(workSpace.get(), *p_queryResults, m_index, p_stats);
+    workSpace->m_postingTrace = nullptr;
     m_workSpaceFactory->ReturnWorkSpace(std::move(workSpace));
     p_queryResults->SortResult();
     return ErrorCode::Success;

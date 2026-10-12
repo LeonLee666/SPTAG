@@ -3,6 +3,9 @@
 
 #pragma once
 #include <limits>
+#include <fstream>
+#include <tuple>
+#include <algorithm>
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -111,6 +114,8 @@ namespace SPTAG {
                 threads.reserve(p_numThreads);
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Searching: numThread: %d, numQueries: %d.\n", p_numThreads, numQueries);
 
+                // Each worker owns a distinct query row; no shared append or mutex is needed.
+                std::vector<std::vector<float>> headInfos(numQueries);
                 Utils::StopW sw;
 
                 for (int i = 0; i < p_numThreads; i++) { threads.emplace_back([&, i]()
@@ -133,6 +138,13 @@ namespace SPTAG {
                                 double startTime = threadws.getElapsedMs();
                                 p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
                                 double endTime = threadws.getElapsedMs();
+                                auto& heads = headInfos[index];
+                                for (int j = 0; j < p_results[index].GetResultNum(); ++j) {
+                                    const auto* res = p_results[index].GetResult(j);
+                                    if (res->VID < 0) break;
+                                    heads.push_back(res->Dist);
+                                }
+                                std::sort(heads.begin(), heads.end());
                                 p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
                                 double exEndTime = threadws.getElapsedMs();
 
@@ -155,6 +167,39 @@ namespace SPTAG {
                     sendingCost,
                     numQueries / sendingCost,
                     static_cast<uint32_t>(numQueries));
+
+                // Headerless rows: query ID followed by sorted distances. Warmup exports are overwritten
+                // by the subsequent measured query batch.
+                const std::string directory = p_index->GetOptions()->m_indexDirectory + FolderSep;
+                std::ofstream headFile(directory + "head.csv");
+                std::ofstream listFile(directory + "list.csv");
+                for (int i = 0; i < numQueries; ++i) {
+                    if (headFile) {
+                        headFile << i;
+                        for (const auto& head : headInfos[i]) {
+                            headFile << ',' << head;
+                        }
+                        headFile << '\n';
+                    }
+                    if (listFile) {
+                        std::vector<float> distances;
+                        for (const auto& posting : p_stats[i].m_nearestPostingVectorDists) {
+                            for (float distance : posting) {
+                                if (distance > 0.0f) distances.push_back(distance);
+                            }
+                        }
+                        std::sort(distances.begin(), distances.end());
+                        listFile << i;
+                        for (float distance : distances) listFile << ',' << distance;
+                        listFile << '\n';
+                    }
+                }
+                headFile.close();
+                listFile.close();
+                SPTAGLIB_LOG(headFile.fail() ? Helper::LogLevel::LL_Error : Helper::LogLevel::LL_Info,
+                    "Head trace export: %shead.csv (%s)\n", directory.c_str(), headFile.fail() ? "failed" : "ok");
+                SPTAGLIB_LOG(listFile.fail() ? Helper::LogLevel::LL_Error : Helper::LogLevel::LL_Info,
+                    "Posting trace export: %slist.csv (%s)\n", directory.c_str(), listFile.fail() ? "failed" : "ok");
 
                 for (int i = 0; i < numQueries; i++) { p_results[i].CleanQuantizedTarget(); }
             }
