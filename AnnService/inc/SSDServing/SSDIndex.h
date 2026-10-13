@@ -3,6 +3,7 @@
 
 #pragma once
 #include <limits>
+#include <fstream>
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -179,7 +180,12 @@ namespace SPTAG {
                 int numThreads = p_opts.m_searchThreadNum;
                 int internalResultNum = p_opts.m_searchInternalResultNum;
                 int K = p_opts.m_resultNum;
-                int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
+                if (K <= 0 || p_opts.m_rerank > K) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "ResultNum must be positive and Rerank must not exceed ResultNum (ResultNum=%d, Rerank=%d).\n",
+                        K, p_opts.m_rerank);
+                    return ErrorCode::FailedParseValue;
+                }
                 ErrorCode ret;
 
                 if (!warmupFile.empty())
@@ -263,6 +269,9 @@ namespace SPTAG {
                     K = p_opts.m_rerank;
                 }
 
+                // K is now the effective output count, including any applied rerank.
+                // Preserve an explicitly configured truth count; otherwise evaluate Recall@K.
+                const int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
                 float recall = 0, MRR = 0;
                 std::vector<std::set<SizeType>> truth;
                 if (!truthFile.empty())
@@ -283,6 +292,55 @@ namespace SPTAG {
 
                     recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
+
+                    // Headerless rows in query order: recall, configured search budget, latency (ms).
+                    // Export only queries actually searched, not the unprocessed tail.
+                    const int searchedQueries = min(numQueries, p_opts.m_queryCountLimit);
+                    const std::string csvPath = p_opts.m_indexDirectory + FolderSep + "recall.csv";
+                    std::ofstream csvFile(csvPath);
+                    if (!csvFile.is_open()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to create recall CSV: %s\n", csvPath.c_str());
+                        return ErrorCode::FailedCreateFile;
+                    }
+                    std::vector<bool> visited(K);
+                    for (int i = 0; i < searchedQueries; ++i) {
+                        float queryRecall = 0;
+                        std::fill(visited.begin(), visited.end(), false);
+                        for (SizeType id : truth[i]) {
+                            for (int j = 0; j < K; ++j) {
+                                const auto* result = results[i].GetResult(j);
+                                if (visited[j] || result->VID < 0) continue;
+                                bool match = result->VID == id;
+                                if (!match && vectorSet != nullptr) {
+                                    const float distance = COMMON::DistanceUtils::ComputeDistance(
+                                        (const ValueType*)querySet->GetVector(i),
+                                        (const ValueType*)vectorSet->GetVector(result->VID),
+                                        vectorSet->Dimension(), p_opts.m_distCalcMethod);
+                                    const float truthDistance = COMMON::DistanceUtils::ComputeDistance(
+                                        (const ValueType*)querySet->GetVector(i),
+                                        (const ValueType*)vectorSet->GetVector(id),
+                                        vectorSet->Dimension(), p_opts.m_distCalcMethod);
+                                    match = (p_opts.m_distCalcMethod == DistCalcMethod::Cosine
+                                        && fabs(distance - truthDistance) < Epsilon)
+                                        || (p_opts.m_distCalcMethod == DistCalcMethod::L2
+                                        && fabs(distance - truthDistance) < Epsilon * (distance + Epsilon));
+                                }
+                                if (match) {
+                                    queryRecall += 1;
+                                    visited[j] = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!truth[i].empty()) queryRecall /= truth[i].size();
+                        csvFile << queryRecall << ',' << internalResultNum << ',' << stats[i].m_totalLatency << '\n';
+                    }
+                    csvFile.close();
+                    if (csvFile.fail()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to write recall CSV: %s\n", csvPath.c_str());
+                        return ErrorCode::DiskIOFail;
+                    }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Exported per-query recall and latency to %s\n", csvPath.c_str());
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
