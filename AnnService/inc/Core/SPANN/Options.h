@@ -8,6 +8,7 @@
 #include "inc/Helper/StringConvert.h"
 #include "inc/Helper/CommonHelper.h"
 #include <string>
+#include <vector>
 
 namespace SPTAG {
     namespace SPANN {
@@ -129,6 +130,10 @@ namespace SPTAG {
             int m_ioThreads;
             int m_searchPostingPageLimit;
             int m_searchInternalResultNum;
+            std::string m_searchInternalResultNumFile;
+            // Runtime capacity, prepared before loading SSD IO handlers. Never changes per query.
+            int m_searchInternalResultNumCapacity = 0;
+            std::vector<int> m_queryInternalResultNums;
             int m_rerank;
             bool m_recall_analysis;
             int m_debugBuildInternalResultNum;

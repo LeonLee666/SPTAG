@@ -171,10 +171,10 @@ namespace SPTAG
             void InitWorkSpace(ExtraWorkSpace* p_exWorkSpace, bool clear = false) override
             {
                 if (clear) {
-                    p_exWorkSpace->Clear(m_opt->m_searchInternalResultNum, max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
+                    p_exWorkSpace->Clear(max(m_opt->m_searchInternalResultNum, m_opt->m_searchInternalResultNumCapacity), max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
                 }
                 else {
-                    p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, m_opt->m_searchInternalResultNum, max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
+                    p_exWorkSpace->Initialize(m_opt->m_maxCheck, m_opt->m_hashExp, max(m_opt->m_searchInternalResultNum, m_opt->m_searchInternalResultNumCapacity), max(m_opt->m_postingPageLimit, m_opt->m_searchPostingPageLimit + 1) << PageSizeEx, false, m_opt->m_enableDataCompression);
                     int wid = 0;
                     if (m_freeWorkSpaceIds == nullptr || !m_freeWorkSpaceIds->try_pop(wid))
                     {
@@ -201,9 +201,9 @@ namespace SPTAG
                     if (curIndexFile == nullptr || !curIndexFile->Initialize(curFile.c_str(),
 #ifndef _MSC_VER
 #ifdef BATCH_READ
-                        O_RDONLY | O_DIRECT, p_opt.m_searchInternalResultNum, 2, 2, p_opt.m_iSSDNumberOfThreads
+                        O_RDONLY | O_DIRECT, max(p_opt.m_searchInternalResultNum, p_opt.m_searchInternalResultNumCapacity), 2, 2, p_opt.m_iSSDNumberOfThreads
 #else
-                        O_RDONLY | O_DIRECT, p_opt.m_searchInternalResultNum * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
+                        O_RDONLY | O_DIRECT, max(p_opt.m_searchInternalResultNum, p_opt.m_searchInternalResultNumCapacity) * p_opt.m_iSSDNumberOfThreads / p_opt.m_ioThreads + 1, 2, 2, p_opt.m_ioThreads
 #endif
 #else
                         GENERIC_READ, (p_opt.m_searchPostingPageLimit + 1) * PageSize, 2, 2, (std::uint16_t)p_opt.m_ioThreads

@@ -101,7 +101,7 @@ namespace SPTAG {
                 int p_numThreads,
                 std::vector<QueryResult>& p_results,
                 std::vector<SPANN::SearchStats>& p_stats,
-                int p_maxQueryCount, int p_internalResultNum)
+                int p_maxQueryCount, int p_internalResultNum, const std::vector<int>* p_queryInternalResultNums = nullptr)
             {
                 int numQueries = min(static_cast<int>(p_results.size()), p_maxQueryCount);
 
@@ -133,7 +133,8 @@ namespace SPTAG {
                                 double startTime = threadws.getElapsedMs();
                                 p_index->GetMemoryIndex()->SearchIndex(p_results[index]);
                                 double endTime = threadws.getElapsedMs();
-                                p_index->SearchDiskIndex(p_results[index], &(p_stats[index]));
+                                p_index->SearchDiskIndex(p_results[index], &(p_stats[index]),
+                                    p_queryInternalResultNums ? (*p_queryInternalResultNums)[index] : p_internalResultNum);
                                 double exEndTime = threadws.getElapsedMs();
 
                                 p_stats[index].m_exLatency = exEndTime - endTime;
@@ -182,6 +183,27 @@ namespace SPTAG {
                 int truthK = (p_opts.m_truthResultNum <= 0) ? K : p_opts.m_truthResultNum;
                 ErrorCode ret;
 
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
+                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
+                auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
+                if (ErrorCode::Success != (ret = queryReader->LoadFile(p_opts.m_queryPath)))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
+                    return ret;
+                }
+                auto querySet = queryReader->GetVectorSet();
+                int numQueries = querySet->Count();
+
+                const bool perQuery = !p_opts.m_searchInternalResultNumFile.empty();
+                if (perQuery && p_opts.m_queryInternalResultNums.size() != static_cast<size_t>(numQueries))
+                {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error,
+                        "InternalResultNumFile %s has %llu rows, but QuerySet has %d queries.\n",
+                        p_opts.m_searchInternalResultNumFile.c_str(),
+                        static_cast<unsigned long long>(p_opts.m_queryInternalResultNums.size()), numQueries);
+                    return ErrorCode::Fail;
+                }
+
                 if (!warmupFile.empty())
                 {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading warmup query set...\n");
@@ -208,18 +230,10 @@ namespace SPTAG {
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish warmup...\n");
                 }
 
-                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start loading QuerySet...\n");
-                std::shared_ptr<Helper::ReaderOptions> queryOptions(new Helper::ReaderOptions(p_opts.m_valueType, p_opts.m_dim, p_opts.m_queryType, p_opts.m_queryDelimiter));
-                auto queryReader = Helper::VectorSetReader::CreateInstance(queryOptions);
-                if (ErrorCode::Success != (ret = queryReader->LoadFile(p_opts.m_queryPath)))
-                {
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to read query file.\n");
-                    return ret;
-                }
-                auto querySet = queryReader->GetVectorSet();
-                int numQueries = querySet->Count();
-
-                std::vector<QueryResult> results(numQueries, QueryResult(NULL, max(K, internalResultNum), false));
+                std::vector<QueryResult> results;
+                results.reserve(numQueries);
+                for (int i = 0; i < numQueries; ++i)
+                    results.emplace_back(nullptr, max(K, perQuery ? p_opts.m_queryInternalResultNums[i] : internalResultNum), false);
                 std::vector<SPANN::SearchStats> stats(numQueries);
                 for (int i = 0; i < numQueries; ++i)
                 {
@@ -230,7 +244,8 @@ namespace SPTAG {
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Start ANN Search...\n");
 
-                SearchSequential(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum);
+                SearchSequential(p_index, numThreads, results, stats, p_opts.m_queryCountLimit, internalResultNum,
+                    perQuery ? &p_opts.m_queryInternalResultNums : nullptr);
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
@@ -377,6 +392,7 @@ namespace SPTAG {
                                 i = sent.fetch_add(1);
                                 if (i < sampleSize)
                                 {
+                                    const int internalResultNum = perQuery ? p_opts.m_queryInternalResultNums[samples[i]] : p_opts.m_searchInternalResultNum;
                                     COMMON::QueryResultSet<ValueType> queryANNHeads(
                                         (const ValueType *)(querySet->GetVector(samples[i])),
                                         max(K, internalResultNum));
@@ -545,7 +561,7 @@ namespace SPTAG {
 
                     float headacc = 0, truthacc = 0, shorter = 0, longer = 0, lost = 0, buildNearQueryHeads = 0, buildAnnNotFound = 0, buildRNGRule = 0, buildPostingCut = 0;
                     for (int i = 0; i < sampleSize; i++) {
-                        headacc += queryHeadRecalls[i];
+                        headacc += perQuery ? queryHeadRecalls[i] / p_opts.m_queryInternalResultNums[samples[i]] : queryHeadRecalls[i];
                         truthacc += truthRecalls[i];
 
                         lost += shouldSelect[i] + shouldSelectLong[i];
@@ -558,7 +574,10 @@ namespace SPTAG {
                         buildPostingCut += postingCut[i];
                     }
 
-                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Query head recall @%d:%f.\n", internalResultNum, headacc / sampleSize / internalResultNum);
+                    if (perQuery)
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Query head recall @per-query InternalResultNum:%f.\n", headacc / sampleSize);
+                    else
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Query head recall @%d:%f.\n", internalResultNum, headacc / sampleSize / internalResultNum);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "BF top %d postings truth recall @%d:%f.\n", sampleK, truthK, truthacc / sampleSize / truthK);
 
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info,

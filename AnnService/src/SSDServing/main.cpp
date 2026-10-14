@@ -12,6 +12,7 @@
 #include "inc/Helper/VectorSetReader.h"
 
 #include "inc/SSDServing/SSDIndex.h"
+#include "inc/SSDServing/QueryInternalResultNum.h"
 #include "inc/SSDServing/Utils.h"
 #include "inc/SSDServing/main.h"
 
@@ -110,12 +111,6 @@ int BootProgram(bool forANNIndexTestTool, std::map<std::string, std::map<std::st
         }
     }
 
-    if (index->BuildIndex() != ErrorCode::Success)
-    {
-        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
-        return -1;
-    }
-
     SPANN::Options *opts = nullptr;
 
 #define DefineVectorValueType(Name, Type)                                                                              \
@@ -130,6 +125,29 @@ int BootProgram(bool forANNIndexTestTool, std::map<std::string, std::map<std::st
     if (opts == nullptr)
     {
         SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Cannot get options.\n");
+        return -1;
+    }
+
+    if (searchSSD && !opts->m_searchInternalResultNumFile.empty())
+    {
+        std::string error;
+        if (!SSDIndex::LoadQueryInternalResultNums(opts->m_searchInternalResultNumFile, opts->m_queryInternalResultNums, error))
+        {
+            SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "%s\n", error.c_str());
+            return -1;
+        }
+        for (int value : opts->m_queryInternalResultNums)
+            opts->m_searchInternalResultNumCapacity = max(opts->m_searchInternalResultNumCapacity, value);
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Info,
+            "Loaded InternalResultNumFile %s: %llu queries, SSD capacity %d.\n",
+            opts->m_searchInternalResultNumFile.c_str(),
+            static_cast<unsigned long long>(opts->m_queryInternalResultNums.size()),
+            max(opts->m_searchInternalResultNum, opts->m_searchInternalResultNumCapacity));
+    }
+
+    if (index->BuildIndex() != ErrorCode::Success)
+    {
+        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed to build index.\n");
         return -1;
     }
 

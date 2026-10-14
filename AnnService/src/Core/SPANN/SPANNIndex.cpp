@@ -516,10 +516,15 @@ ErrorCode Index<T>::SearchIndexWithFilter(QueryResult &p_query, std::function<bo
     return ErrorCode::Fail;
 }
 
-template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats) const
+template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, SearchStats *p_stats, int p_internalResultNum) const
 {
     if (nullptr == m_extraSearcher)
         return ErrorCode::EmptyIndex;
+
+    const int internalResultNum = p_internalResultNum == -1 ? m_options.m_searchInternalResultNum : p_internalResultNum;
+    if (internalResultNum <= 0 || internalResultNum > p_query.GetResultNum() ||
+        internalResultNum > max(m_options.m_searchInternalResultNum, m_options.m_searchInternalResultNumCapacity))
+        return ErrorCode::Fail;
 
     COMMON::QueryResultSet<T> *p_queryResults = (COMMON::QueryResultSet<T> *)&p_query;
 
@@ -539,7 +544,7 @@ template <typename T> ErrorCode Index<T>::SearchDiskIndex(QueryResult &p_query, 
 
     float limitDist = p_queryResults->GetResult(0)->Dist * m_options.m_maxDistRatio;
     int i = 0;
-    for (; i < m_options.m_searchInternalResultNum; ++i)
+    for (; i < internalResultNum; ++i)
     {
         auto res = p_queryResults->GetResult(i);
         if (res->VID == -1 || (limitDist > 0.1 && res->Dist > limitDist))
