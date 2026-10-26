@@ -3,6 +3,9 @@
 
 #pragma once
 #include <limits>
+#include <fstream>
+#include <iomanip>
+#include <locale>
 #include "inc/Core/Common.h"
 #include "inc/Core/Common/DistanceUtils.h"
 #include "inc/Core/Common/QueryResultSet.h"
@@ -193,6 +196,7 @@ namespace SPTAG {
                 }
                 auto querySet = queryReader->GetVectorSet();
                 int numQueries = querySet->Count();
+                const int fullQueryCount = numQueries;
 
                 const bool perQuery = !p_opts.m_searchInternalResultNumFile.empty();
                 if (perQuery && p_opts.m_queryInternalResultNums.size() != static_cast<size_t>(numQueries))
@@ -249,6 +253,12 @@ namespace SPTAG {
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nFinish ANN Search...\n");
 
+                // Keep the full-query parameter mapping, but evaluate/export only executed queries.
+                numQueries = max(0, min(numQueries, p_opts.m_queryCountLimit));
+                if (numQueries == 0) return ErrorCode::Success;
+                results.resize(numQueries);
+                stats.resize(numQueries);
+
                 std::shared_ptr<VectorSet> vectorSet;
 
                 if (!p_opts.m_vectorPath.empty() && fileexists(p_opts.m_vectorPath.c_str())) {
@@ -277,6 +287,7 @@ namespace SPTAG {
                     }
                     K = p_opts.m_rerank;
                 }
+                if (p_opts.m_truthResultNum <= 0) truthK = K;
 
                 float recall = 0, MRR = 0;
                 std::vector<std::set<SizeType>> truth;
@@ -290,14 +301,35 @@ namespace SPTAG {
                         return ErrorCode::FailedOpenFile;
                     }
                     int originalK = truthK;
-                    COMMON::TruthSet::LoadTruth(ptr, truth, numQueries, originalK, truthK, p_opts.m_truthType);
+                    int truthQueryCount = fullQueryCount;
+                    COMMON::TruthSet::LoadTruth(ptr, truth, truthQueryCount, originalK, truthK, p_opts.m_truthType);
                     char tmp[4];
                     if (ptr->ReadBinary(4, tmp) == 4) {
-                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", numQueries);
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Truth number is larger than query number(%d)!\n", fullQueryCount);
                     }
 
-                    recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR);
+                    std::vector<float> perQueryRecall;
+                    recall = COMMON::TruthSet::CalculateRecall<ValueType>((p_index->GetMemoryIndex()).get(), results, truth, K, truthK, querySet, vectorSet, numQueries, nullptr, false, &MRR, &perQueryRecall);
                     SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Recall%d@%d: %f MRR@%d: %f\n", truthK, K, recall, K, MRR);
+
+                    const std::string csvPath = p_opts.m_indexDirectory + FolderSep + "per_query_recall.csv";
+                    std::ofstream csv(csvPath);
+                    if (!csv.is_open()) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed create recall CSV: %s\n", csvPath.c_str());
+                        return ErrorCode::FailedCreateFile;
+                    }
+                    csv.imbue(std::locale::classic());
+                    // Match DiskANN params/foreach: no header, one recall in [0,1] per query.
+                    csv << std::fixed << std::setprecision(2);
+                    for (int i = 0; i < numQueries; ++i) {
+                        csv << perQueryRecall[i] << '\n';
+                    }
+                    csv.close();
+                    if (!csv) {
+                        SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed write recall CSV: %s\n", csvPath.c_str());
+                        return ErrorCode::DiskIOFail;
+                    }
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Per-query recall saved to %s (%d rows).\n", csvPath.c_str(), numQueries);
                 }
 
                 SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "\nEx Elements Count:\n");
