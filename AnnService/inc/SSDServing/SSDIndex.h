@@ -255,9 +255,28 @@ namespace SPTAG {
 
                 // Keep the full-query parameter mapping, but evaluate/export only executed queries.
                 numQueries = max(0, min(numQueries, p_opts.m_queryCountLimit));
-                if (numQueries == 0) return ErrorCode::Success;
                 results.resize(numQueries);
                 stats.resize(numQueries);
+
+                const std::string latencyCsvPath = p_opts.m_indexDirectory + FolderSep + "per_query_latency.csv";
+                std::ofstream latencyCsv(latencyCsvPath);
+                if (!latencyCsv.is_open()) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed create latency CSV: %s\n", latencyCsvPath.c_str());
+                    return ErrorCode::FailedCreateFile;
+                }
+                latencyCsv.imbue(std::locale::classic());
+                // Milliseconds for head + SSD search, excluding preparation and subsequent rerank/export.
+                latencyCsv << std::fixed << std::setprecision(6);
+                for (int i = 0; i < numQueries; ++i) {
+                    latencyCsv << stats[i].m_totalLatency << '\n';
+                }
+                latencyCsv.close();
+                if (!latencyCsv) {
+                    SPTAGLIB_LOG(Helper::LogLevel::LL_Error, "Failed write latency CSV: %s\n", latencyCsvPath.c_str());
+                    return ErrorCode::DiskIOFail;
+                }
+                SPTAGLIB_LOG(Helper::LogLevel::LL_Info, "Per-query latency saved to %s (%d rows, ms).\n", latencyCsvPath.c_str(), numQueries);
+                if (numQueries == 0) return ErrorCode::Success;
 
                 std::shared_ptr<VectorSet> vectorSet;
 
